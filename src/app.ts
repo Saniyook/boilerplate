@@ -116,8 +116,6 @@ export default class Application {
           p = undefined;
       }
 
-      console.log(parameter.schema as SchemaObject, p);
-
       return this._convertParams(parameter.schema as SchemaObject, p);
     });
 
