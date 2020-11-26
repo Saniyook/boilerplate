@@ -24,6 +24,7 @@ export interface ApplicationParams {
   port: number;
   apiPath: string;
   apiVersion: string;
+  docsPath: string;
 }
 
 const DEFAULT_PARAMS: ApplicationParams = {
@@ -32,6 +33,7 @@ const DEFAULT_PARAMS: ApplicationParams = {
   port: Number(process.env.API_PORT) || 8000,
   apiPath: process.env.API_PATH || 'api',
   apiVersion: process.env.API_VERISON || 'v1',
+  docsPath: process.env.API_DOCS_PATH || 'api-docs',
 };
 
 export default class Application {
@@ -146,7 +148,7 @@ export default class Application {
   }
 
   private _init() {
-    const { proto, host, port, apiPath, apiVersion } = this._params;
+    const { proto, host, port, apiPath, apiVersion, docsPath } = this._params;
     const apiSpec = getOpenApiSpec(
       this._pathsSpec,
       this._components,
@@ -155,8 +157,8 @@ export default class Application {
 
     this.app.use(bodyParser.urlencoded({ extended: false }));
     this.app.use(bodyParser.json());
-    this.app.use('/api-docs', swaggerUi.serve);
-    this.app.get('/api-docs', swaggerUi.setup(apiSpec));
+    this.app.use(`/${docsPath}`, swaggerUi.serve);
+    this.app.get(`/${docsPath}`, swaggerUi.setup(apiSpec));
     this.app.use(
       createOpenApiMiddleware({
         apiSpec,
@@ -178,7 +180,12 @@ export default class Application {
     this._init();
     return new Promise((res) => {
       http.createServer(this.app).listen(this._params.port, () => {
+        const { proto, host, port, docsPath } = this._params;
+
         console.log('Server started at port ' + this._params.port);
+        console.log(
+          `See docs at ${getApiServerURL(proto, host, port, docsPath)}`
+        );
         res();
       });
     });
