@@ -1,0 +1,1 @@
+export type ExpressHttpVerbsType = 'all' | 'get' | 'post' | 'put' | 'delete' | 'patch' | 'options' | 'head'
