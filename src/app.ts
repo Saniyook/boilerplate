@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import {
   ComponentsObject,
   getControllerSpec,
@@ -17,6 +19,8 @@ import { ExpressHttpVerbsType } from './types/http';
 import { merge } from 'lodash';
 import { getControllerResponseMeta } from './heplers/getControllerResponseMeta';
 import bodyParser from 'body-parser';
+import { getOperationDescription } from './heplers/getOperationDescription';
+import { getInjectedParams } from './heplers/getInjectedParams';
 
 export interface ApplicationParams {
   proto: string;
@@ -43,13 +47,14 @@ export default class Application {
   private _params: ApplicationParams = DEFAULT_PARAMS;
   private _apiPrefix!: string;
   private _apiRouter = express.Router();
+  private _apiSpec: OpenAPIV3.Document = {} as OpenAPIV3.Document;
 
   constructor(params?: Partial<ApplicationParams>) {
     this._params = { ...this._params, ...params };
     this._apiPrefix = `/${this._params.apiPath}/${this._params.apiVersion}`;
   }
 
-  controlller(controller: new (...args: any[]) => any) {
+  controller(controller: new (...args: any[]) => any) {
     const { paths, basePath = '', components } = getControllerSpec(controller);
     const responses = getControllerResponseMeta(controller);
 
@@ -64,25 +69,58 @@ export default class Application {
         const operation = paths[path][verb] as OperationObject;
         const expressPath = openApiPathToExpress(pathWithBaseControllerPath);
         const { 'x-operation-name': propName, parameters } = operation;
-        const responsesSpec = responses[propName];
+        const responsesSpec = responses?.[propName];
+        const operationDescription = getOperationDescription(
+          controller,
+          propName
+        );
+        paths[path][verb].description = operationDescription;
+        const injectedParams = getInjectedParams(controller, propName);
+        const instance = new controller();
 
-        this._apiRouter[verb](expressPath, (req, res) => {
-          const args = this.getArgumentsFromRequest(
+        this._apiRouter[verb](expressPath, async (req, res) => {
+          let params = this.getArgumentsFromRequest(
             req,
             parameters as ParameterObject[]
           );
 
+          const arrayWithIndexedArgs: any[] = new Array(
+            ...Array(instance[propName].length)
+          );
+
           if (operation.requestBody) {
             const index = operation.requestBody['x-parameter-index'];
-            args.splice(index, 0, req.body);
+            arrayWithIndexedArgs.splice(index, 1, req.body);
           }
 
-          const instance = new controller();
-          const result = instance[propName](...args);
-          const response = responsesSpec.find((spec) => {
-            return result instanceof (spec.responseModelOrSpec as Function);
+          if (Number.isInteger(injectedParams.requestObjectIndex)) {
+            arrayWithIndexedArgs.splice(
+              injectedParams.requestObjectIndex,
+              1,
+              req
+            );
+          }
+
+          if (Number.isInteger(injectedParams.responseObjectIndex)) {
+            arrayWithIndexedArgs.splice(
+              injectedParams.responseObjectIndex,
+              1,
+              res
+            );
+          }
+
+          const args = arrayWithIndexedArgs.map((argument) => {
+            return argument || params.shift();
           });
-          return res.status(response?.responseCode || 500).json(result);
+
+          const result = await instance[propName](...args);
+          const code = responsesSpec.find((spec) => {
+            return result instanceof (spec.responseModelOrSpec as Function);
+          })?.responseCode;
+
+          if (!res.writableEnded) {
+            return res.status(code || 500).json(result);
+          }
         });
       });
 
@@ -123,7 +161,10 @@ export default class Application {
   }
 
   private _convertParams(schema: SchemaObject, parameter: any) {
-    console.log(schema, parameter);
+    if (parameter === undefined) {
+      return parameter;
+    }
+
     if (schema.type === 'string') {
       return String(parameter);
     }
@@ -147,7 +188,7 @@ export default class Application {
 
   private _init() {
     const { proto, host, port, apiPath, apiVersion, docsPath } = this._params;
-    const apiSpec = getOpenApiSpec(
+    this._apiSpec = getOpenApiSpec(
       this._pathsSpec,
       this._components,
       getApiServerURL(proto, host, port, apiPath, apiVersion)
@@ -156,10 +197,10 @@ export default class Application {
     this.app.use(bodyParser.urlencoded({ extended: false }));
     this.app.use(bodyParser.json());
     this.app.use(`/${docsPath}`, swaggerUi.serve);
-    this.app.get(`/${docsPath}`, swaggerUi.setup(apiSpec));
+    this.app.get(`/${docsPath}`, swaggerUi.setup(this._apiSpec));
     this.app.use(
       createOpenApiMiddleware({
-        apiSpec,
+        apiSpec: this._apiSpec,
         validateResponses: true,
         validateRequests: true,
       })
@@ -176,15 +217,26 @@ export default class Application {
 
   async start() {
     this._init();
-    return new Promise((res) => {
+
+    return new Promise((res, rej) => {
       http.createServer(this.app).listen(this._params.port, () => {
         const { proto, host, port, docsPath } = this._params;
-
         console.log('Server started at port ' + this._params.port);
         console.log(
           `See docs at ${getApiServerURL(proto, host, port, docsPath)}`
         );
-        res();
+        fs.writeFile(
+          path.resolve(__dirname, './api.json'),
+          JSON.stringify(this._apiSpec, null, 2),
+          (err) => {
+            if (err) {
+              rej(err);
+              return console.log({ err });
+            }
+
+            res();
+          }
+        );
       });
     });
   }

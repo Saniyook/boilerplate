@@ -1,5 +1,5 @@
 import UserControllerBase from './base';
-import GetUserController from './getUser';
+import GetUser from './getUser';
 import { applyControllerMixins } from '../../heplers/applyControllerMixins';
 
-export default applyControllerMixins(UserControllerBase, [GetUserController]);
+export default applyControllerMixins(UserControllerBase, [GetUser]);
