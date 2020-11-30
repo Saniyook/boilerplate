@@ -3,8 +3,8 @@
   "execMap": {
     "ts": "ts-node"
   },
-  "wathc": ["src/"],
+  "wathc": ["src/**/*"],
   "exec": "ts-node .",
-  "ignore": [".git", "node_modules/**/node_modules"],
+  "ignore": [".git", "node_modules/**", "api.json"],
   "ext": "ts,json"
 }

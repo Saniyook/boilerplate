@@ -7,6 +7,7 @@ import {
 } from '@loopback/openapi-v3';
 import { model, Model, property } from '@loopback/repository';
 import { Request } from 'express';
+import { authenticate } from '../../decorators/authenticate';
 import { requestObject } from '../../decorators/requestObject';
 import { User } from '../../models/user.model';
 import { SomeError } from '../responseModels';
@@ -29,7 +30,7 @@ export default class {
   })
   @response(200, UserWithNumber)
   @response(413, SomeError)
-
+  @authenticate('jwt')
   // Property name should be unique for every controller as operationId
   async getUser(
     @requestObject() req: Request,
@@ -56,7 +57,7 @@ export default class {
     const u = new User({
       name: 'name',
       address: { street: 'street', house: 0 },
-      birthday: new Date(),
+      birthday: new Date().toISOString(),
     });
 
     // Request object will be injected
@@ -64,12 +65,12 @@ export default class {
 
     if (Math.random() > 0.5) {
       if (param) {
-        return new UserWithNumber({ user: user || u, numbers: [...param, id] });
+        return new UserWithNumber({ user: u, numbers: [...param, id] });
       }
 
       await new Promise((res) => setTimeout(res, 2000));
 
-      return Promise.resolve(new UserWithNumber({ user: user, numbers: [id] }));
+      return Promise.resolve(new UserWithNumber({ user: u, numbers: [id] }));
     }
 
     return new SomeError('Oops');

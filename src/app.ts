@@ -7,7 +7,7 @@ import {
   ParameterObject,
   SchemaObject,
 } from '@loopback/openapi-v3';
-import express, { Request, Response } from 'express';
+import express, { IRouterMatcher, Request, Response } from 'express';
 import { middleware as createOpenApiMiddleware } from 'express-openapi-validator';
 import { OpenAPIV3 } from 'express-openapi-validator/dist/framework/types';
 import http from 'http';
@@ -21,6 +21,8 @@ import { getControllerResponseMeta } from './heplers/getControllerResponseMeta';
 import bodyParser from 'body-parser';
 import { getOperationDescription } from './heplers/getOperationDescription';
 import { getInjectedParams } from './heplers/getInjectedParams';
+import YML from 'json-to-pretty-yaml';
+import { LoopbackOpenApiSpecMetaKeys } from './const/LoopbackMetadataKeys';
 
 export interface ApplicationParams {
   proto: string;
@@ -31,6 +33,7 @@ export interface ApplicationParams {
   docsPath: string;
 }
 
+// TODO config module
 const DEFAULT_PARAMS: ApplicationParams = {
   proto: process.env.API_PROTO || 'http',
   host: process.env.API_HOST || 'localhost',
@@ -48,6 +51,7 @@ export default class Application {
   private _apiPrefix!: string;
   private _apiRouter = express.Router();
   private _apiSpec: OpenAPIV3.Document = {} as OpenAPIV3.Document;
+  private _authStrategies: Map<string, IRouterMatcher<void>> = new Map();
 
   constructor(params?: Partial<ApplicationParams>) {
     this._params = { ...this._params, ...params };
@@ -62,13 +66,15 @@ export default class Application {
 
     routes.forEach((path) => {
       const pathWithBaseControllerPath = `${basePath}${path}`;
-
       const verbs = Reflect.ownKeys(paths[path]) as ExpressHttpVerbsType[];
 
       verbs.forEach((verb) => {
         const operation = paths[path][verb] as OperationObject;
         const expressPath = openApiPathToExpress(pathWithBaseControllerPath);
-        const { 'x-operation-name': propName, parameters } = operation;
+        const {
+          [LoopbackOpenApiSpecMetaKeys.PROPERTY_NAME]: propName,
+          parameters,
+        } = operation;
         const responsesSpec = responses?.[propName];
         const operationDescription = getOperationDescription(
           controller,
@@ -77,6 +83,8 @@ export default class Application {
         paths[path][verb].description = operationDescription;
         const injectedParams = getInjectedParams(controller, propName);
         const instance = new controller();
+
+        const authHandler = this._authStrategies.get('jwt');
 
         this._apiRouter[verb](expressPath, async (req, res) => {
           let params = this.getArgumentsFromRequest(
@@ -89,24 +97,21 @@ export default class Application {
           );
 
           if (operation.requestBody) {
-            const index = operation.requestBody['x-parameter-index'];
+            const index =
+              operation.requestBody[
+                LoopbackOpenApiSpecMetaKeys.PARAMETER_INDEX
+              ];
             arrayWithIndexedArgs.splice(index, 1, req.body);
           }
 
           if (Number.isInteger(injectedParams.requestObjectIndex)) {
-            arrayWithIndexedArgs.splice(
-              injectedParams.requestObjectIndex,
-              1,
-              req
-            );
+            const index = injectedParams.requestObjectIndex;
+            arrayWithIndexedArgs.splice(index, 1, req);
           }
 
           if (Number.isInteger(injectedParams.responseObjectIndex)) {
-            arrayWithIndexedArgs.splice(
-              injectedParams.responseObjectIndex,
-              1,
-              res
-            );
+            const index = injectedParams.responseObjectIndex;
+            arrayWithIndexedArgs.splice(index, 1, res);
           }
 
           const args = arrayWithIndexedArgs.map((argument) => {
@@ -129,6 +134,10 @@ export default class Application {
       ] as OpenAPIV3.PathItemObject;
       this._components = merge(this._components, components);
     });
+  }
+
+  secure(strategyName: string, handler: IRouterMatcher<void>) {
+    this._authStrategies.set(strategyName, handler);
   }
 
   protected getArgumentsFromRequest(
@@ -207,11 +216,12 @@ export default class Application {
     );
     this.app.use(this._apiPrefix, this._apiRouter);
     this.app.use((err: any, req: Request, res: Response, next: Function) => {
-      console.error(err);
-      res.status(err.status || 500).json({
-        message: err.message,
-        errors: err.errors,
-      });
+      if (!res.writableEnded) {
+        res.status(err.status || 500).json({
+          message: err.message,
+          errors: err.errors,
+        });
+      }
     });
   }
 
@@ -225,18 +235,17 @@ export default class Application {
         console.log(
           `See docs at ${getApiServerURL(proto, host, port, docsPath)}`
         );
-        fs.writeFile(
-          path.resolve(__dirname, './api.json'),
-          JSON.stringify(this._apiSpec, null, 2),
-          (err) => {
-            if (err) {
-              rej(err);
-              return console.log({ err });
-            }
 
-            res();
+        const yml = YML.stringify(this._apiSpec);
+
+        fs.writeFile(path.resolve(__dirname, '../api.yml'), yml, (err) => {
+          if (err) {
+            rej(err);
+            return console.log({ err });
           }
-        );
+
+          res();
+        });
       });
     });
   }

@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { RestEndpoint } from '@loopback/openapi-v3';
-import { OPENAPI_V3_METHODS_KEY } from '../const/loopbackMetaKeys';
+import { LoopbackMetadataKeys } from '../const/LoopbackMetadataKeys';
 
 export interface ControllerMethodsMeta {
   [propName: string]: RestEndpoint;
@@ -11,7 +11,7 @@ export const getOperationDescription = (
   propName: string
 ) => {
   const meta = Reflect.getOwnMetadata(
-    OPENAPI_V3_METHODS_KEY,
+    LoopbackMetadataKeys.OPENAPI_V3_METHODS_KEY,
     controller.prototype
   ) as ControllerMethodsMeta;
   return meta?.[propName]?.spec?.description ?? '';

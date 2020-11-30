@@ -10,7 +10,7 @@ export class User extends Model {
   address!: Partial<Address>;
 
   @property({ type: Date, required: true })
-  birthday!: Date;
+  birthday!: string;
 
   constructor(data: Partial<User>) {
     super(data);
